@@ -18,7 +18,7 @@ class FixedLR(BaseLR):
             Learning rate value to be returned at each call
         """
         super().__init__()
-        self.base_lr = base_lr
+        self.base_lr = base_lr 
 
     def lr_step(self, **lr_kwargs) -> float:
         """

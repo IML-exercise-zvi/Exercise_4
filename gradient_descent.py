@@ -45,7 +45,7 @@ class GradientDescent:
                  tol: float = 1e-5,
                  max_iter: int = 1000,
                  out_type: str = "last",
-                 callback: Callable[[GradientDescent, ...], None] = default_callback):
+                 callback: Callable[..., None] = default_callback):
         """
         Instantiate a new instance of the GradientDescent class
 
@@ -120,4 +120,31 @@ class GradientDescent:
                 Euclidean norm of w^(t)-w^(t-1)
 
         """
-        raise NotImplementedError()
+        t, delta, prev_step = 0, self.tol_, np.copy(f.weights)
+        best_val, best_weights, cweights = np.inf, None, np.zeros_like(f.weights)
+
+        while t < self.max_iter_ and delta >= self.tol_:
+            # forward pass
+            val = f.compute_output(X=X, y=y)
+            # backward pass
+            grad = f.compute_jacobian(X=X, y=y)
+            # Compute learning rate
+            eta = self.learning_rate_.lr_step(f=f, x=X, dx=-grad, t=t)
+
+            # Performing descent step - taking a step in the negative direction
+            f.weights -= eta * grad
+            cweights += f.weights
+
+            # Update variables for next iteration
+            t, prev_step, delta = t+1, np.copy(f.weights), np.linalg.norm(f.weights - prev_step)
+            if val < best_val:
+                best_val, best_weights = val, f.weights
+
+            # Call callback function after each iteration
+            self.callback_(solver=self, weight=np.copy(f.weights), val=val, grad=grad, t=t, eta=eta, delta=delta)
+
+        if self.out_type_ == "last":
+            return f.weights
+        if self.out_type_ == "best":
+            return best_weights
+        return cweights / t

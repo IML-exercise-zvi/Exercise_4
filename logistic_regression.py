@@ -89,7 +89,17 @@ class LogisticRegression(BaseEstimator):
         Fits model using specified `self.solver_` passed when instantiating class and includes an intercept
         if specified by `self.include_intercept_
         """
-        raise NotImplementedError()
+        if self.include_intercept_:
+            X = np.c_[np.ones(X.shape[0]), X]
+
+        init = np.random.randn(X.shape[1]) / (X.shape[1] ** 0.5)
+        objective = LogisticModule(weights=init) if self.penalty_ == "none" else \
+            RegularizedModule(fidelity_module=LogisticModule(),
+                              regularization_module={"l1": L1, "l2": L2}[self.penalty_](),
+                              lam=self.lam_,
+                              include_intercept=self.include_intercept_,
+                              weights=init)
+        self.coefs_ = self.solver_.fit(objective, X, y)
 
     def _predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -105,7 +115,7 @@ class LogisticRegression(BaseEstimator):
         responses : ndarray of shape (n_samples, )
             Predicted responses of given samples
         """
-        raise NotImplementedError()
+        return self.predict_proba(X) > self.alpha_ 
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
@@ -121,7 +131,11 @@ class LogisticRegression(BaseEstimator):
         probabilities: ndarray of shape (n_samples,)
             Probability of each sample being classified as `1` according to the fitted model
         """
-        raise NotImplementedError()
+        if not self.fitted_:
+            raise ValueError("Model has not been fitted yet")
+        if self.include_intercept_:
+            X = np.c_[np.ones(X.shape[0]), X]
+        return 1 / (1 + np.exp(-X @ self.coefs_))   
 
     def _loss(self, X: np.ndarray, y: np.ndarray) -> float:
         """
@@ -140,4 +154,5 @@ class LogisticRegression(BaseEstimator):
         loss : float
             Performance under misclassification error
         """
-        raise NotImplementedError()
+        from loss_functions import misclassification_error
+        return misclassification_error(y, self.predict(X))

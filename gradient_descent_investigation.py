@@ -107,7 +107,7 @@ def compare_fixed_learning_rates(init: np.ndarray = np.array([np.sqrt(2), np.e /
                                          title=f"Convergence of {module.__name__}"))
         colors = ['red', 'green', 'blue', 'purple']
         for eta, color in zip(results.keys(), colors):
-            fig.add_trace(go.Scatter(x=list(range(len(results[eta][0]))), y=results[eta][0], mode="lines", name="eta={eta}", line=dict(color=color)))
+            fig.add_trace(go.Scatter(x=list(range(len(results[eta][0]))), y=results[eta][0], mode="lines", name="eta=" + str(eta), line=dict(color=color)))
         fig.write_html(f"GD_{module.__name__}_fixed_rate_convergence.html")
 
 
@@ -159,47 +159,47 @@ def fit_logistic_regression():
     go.Figure([go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(color="purple", dash='dash'), showlegend=False),
                go.Scatter(x=fpr, y=tpr, mode='lines', text=thresholds, showlegend=False,
                           hovertemplate="<b>Threshold:</b>%{text:.3f}<br>FPR: %{x:.3f}<br>TPR: %{y:.3f}")],
-              layout=go.Layout(title=rf"$\text{{ROC Curve - Logistic Regression - AUC}}={auc(fpr, tpr):.3f}$",
-                               width=400, height=400, xaxis=dict(title="FPR"), yaxis=dict(title="TPR")))\
+              layout=go.Layout(title="ROC Curve for Logistic Regression, AUC:" + str(auc(fpr, tpr)),
+                               width=700, height=700, xaxis=dict(title="FPR"), yaxis=dict(title="TPR")))\
             .write_html(f"gd_logistic_roc_lr{lr:.4f}.html")
 
-    model.alpha_ = thresholds[np.argmax(tpr-fpr)] # Set threshold to maximize TPR-FPR
+    #find the optimal alpha for tpr-fpr
+    model.alpha = thresholds[np.argmax(tpr-fpr)] 
+    print(f"argmax(TPR-FPR): {model.alpha},test error: {model.loss(X_test.values, y_test.values)}\n")
 
-    lamdas = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
-    for penalty, lambdas in [("l1", lamdas),
-                             ("l2", lamdas)]:
-        # Running cross validation
-        scores = np.zeros((len(lambdas), 2))
-        for i, lamda in enumerate(lambdas):
+    lambdas = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
+    # Running cross validation
+    scores = np.zeros((len(lambdas), 2))
+    for i, lamda in enumerate(lambdas):
 
-            gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter)
-            logistic = LogisticRegression(solver=gd, penalty=penalty, lam=lamda, alpha=.5)
-            scores[i] = cross_validate(estimator=logistic, X=X_train.values, y=y_train.values,
-                                       scoring=misclassification_error)
-
-        # Selecting optimal lambda
-        fig = go.Figure([go.Scatter(x=lambdas, y=scores[:, 0], name="Train Error", line=dict(color='purple')),
-                         go.Scatter(x=lambdas, y=scores[:, 1], name="Validation Error", line=dict(color='green'))],
-                        layout=go.Layout(
-                            title="Train and Validation errors for Logistic Regression",
-                            xaxis=dict(title="Lambda"),
-                            yaxis=dict(title="Error Rate")))
-        fig.write_html(f"{penalty}_logistic_regression_errors.html")
-
-        # fitting a model with the best lambda on the entire train set
-        lam_opt = lambdas[np.argmin(scores[:, 1])]
         gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter)
-        model = LogisticRegression(solver=gd, penalty=penalty, lam=lam_opt, alpha=.5).fit(X_train.values, y_train.values)
+        logistic = LogisticRegression(solver=gd, penalty="l1", lam=lamda, alpha=.5)
+        scores[i] = cross_validate(estimator=logistic, X=X_train.values, y=y_train.values,
+                                    scoring=misclassification_error)
 
-        # Get predictions
-        train_pred = model.predict(X_train.values)
-        test_pred = model.predict(X_test.values)
+    # Selecting optimal lambda
+    fig = go.Figure([go.Scatter(x=lambdas, y=scores[:, 0], name="Train Error", line=dict(color='purple')),
+                        go.Scatter(x=lambdas, y=scores[:, 1], name="Validation Error", line=dict(color='green'))],
+                    layout=go.Layout(
+                        title="Train and Validation errors for Logistic Regression",
+                        xaxis=dict(title="Lambda"),
+                        yaxis=dict(title="Error Rate")))
+    fig.write_html(f"{"l1"}_logistic_regression_errors.html")
 
-        print(f"Optimal lambda for {penalty} penalty: {lam_opt}, Train Error: {misclassification_error(y_train.values, train_pred):.3f}, Test Error: {misclassification_error(y_test.values, test_pred)}")
+    # fitting a model with the best lambda on the entire train set
+    lam_opt = lambdas[np.argmin(scores[:, 1])]
+    gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter)
+    model = LogisticRegression(solver=gd, penalty="l1", lam=lam_opt, alpha=.5).fit(X_train.values, y_train.values)
+
+    # Get predictions
+    train_pred = model.predict(X_train.values)
+    test_pred = model.predict(X_test.values)
+
+    print(f"Optimal lambda for l1: penalty: {lam_opt}, Train Error: {misclassification_error(y_train.values, train_pred):.3f}, Test Error: {misclassification_error(y_test.values, test_pred)}")
 
 
 
 if __name__ == '__main__':
     np.random.seed(0)
-    compare_fixed_learning_rates()
+    #compare_fixed_learning_rates()
     fit_logistic_regression()

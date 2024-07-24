@@ -121,30 +121,32 @@ class GradientDescent:
 
         """
         t, delta, prev_step = 0, self.tol_, np.copy(f.weights)
-        best_val, best_weights, cweights = np.inf, None, np.zeros_like(f.weights)
+        best_value, best_weights, weights_vector = np.inf, None, np.zeros_like(f.weights)
 
         while t < self.max_iter_ and delta >= self.tol_:
-            # forward pass
-            val = f.compute_output(X=X, y=y)
-            # backward pass
-            grad = f.compute_jacobian(X=X, y=y)
-            # Compute learning rate
-            eta = self.learning_rate_.lr_step(f=f, x=X, dx=-grad, t=t)
 
-            # Performing descent step - taking a step in the negative direction
-            f.weights -= eta * grad
-            cweights += f.weights
+            # forward pass and gradient computation
+            value = f.compute_output(X=X, y=y)
+            gradient = f.compute_jacobian(X=X, y=y)
 
-            # Update variables for next iteration
-            t, prev_step, delta = t+1, np.copy(f.weights), np.linalg.norm(f.weights - prev_step)
-            if val < best_val:
-                best_val, best_weights = val, f.weights
+            # Compute learning rate and update weights
+            eta = self.learning_rate_.lr_step(f=f, x=X, dx=-gradient, t=t)
 
-            # Call callback function after each iteration
-            self.callback_(solver=self, weight=np.copy(f.weights), val=val, grad=grad, t=t, eta=eta, delta=delta)
+            # Update weights and track descent path
+            f.weights -= eta * gradient
+            weights_vector += f.weights
 
-        if self.out_type_ == "last":
-            return f.weights
-        if self.out_type_ == "best":
-            return best_weights
-        return cweights / t
+            # Update iteration and check stopping criterion
+            t = t + 1
+            delta = np.linalg.norm(f.weights - prev_step)
+            prev_step = np.copy(f.weights)
+            
+            if value < best_value:
+                best_value = value
+                best_weights = np.copy(f.weights)
+
+            # Call callback function (a way the user can track the optimization process)
+            self.callback_(solver=self, weight=np.copy(f.weights), value=value, grad=gradient, t=t, eta=eta, delta=delta)
+
+        answer_dict = {"last": f.weights, "best": best_weights, "average": weights_vector / t}
+        return answer_dict[self.out_type_]

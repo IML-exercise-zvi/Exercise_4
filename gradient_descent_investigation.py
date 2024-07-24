@@ -6,13 +6,12 @@ from base_module import BaseModule
 from base_learning_rate import  BaseLR
 from gradient_descent import GradientDescent
 from learning_rate import FixedLR
-
-
-
-#  from IMLearn.desent_methods import GradientDescent, FixedLR, ExponentialLR
 from modules import L1, L2
 from logistic_regression import LogisticRegression
 from utils import split_train_test
+from loss_functions import misclassification_error
+from cross_validate import cross_validate
+from sklearn.metrics import roc_curve, auc
 
 import plotly.graph_objects as go
 
@@ -40,7 +39,7 @@ def plot_descent_path(module: Type[BaseModule],
         Plot's x-axis range
 
     yrange: Tuple[float, float], default=(-1.5, 1.5)
-        Plot's x-axis range
+        Plot's y-axis range
 
     Return:
     -------
@@ -57,7 +56,7 @@ def plot_descent_path(module: Type[BaseModule],
 
     from utils import decision_surface
     return go.Figure([decision_surface(predict_, xrange=xrange, yrange=yrange, density=70, showscale=False),
-                      go.Scatter(x=descent_path[:, 0], y=descent_path[:, 1], mode="markers+lines", marker_color="black")],
+                      go.Scatter(x=descent_path[:, 0], y=descent_path[:, 1], mode="markers+lines", marker_color="blue")],
                      layout=go.Layout(xaxis=dict(range=xrange),
                                       yaxis=dict(range=yrange),
                                       title=f"GD Descent Path {title}"))
@@ -90,27 +89,26 @@ def get_gd_state_recorder_callback() -> Tuple[Callable[[], None], List[np.ndarra
 
 def compare_fixed_learning_rates(init: np.ndarray = np.array([np.sqrt(2), np.e / 3]),
                                  etas: Tuple[float] = (1, .1, .01, .001)):
-    for name, module in {"L1": L1, "L2": L2}.items():
+    for module in [L1, L2]:
         results = {}
         for eta in etas:
-            # Retrieve a new callback function
-            callback, vals, weights = get_gd_state_recorder_callback()
-            # Use GD to minimize the given objective, with specified fixed learning rate
-            GradientDescent(learning_rate=FixedLR(eta), callback=callback).fit(module(weights=np.copy(init)), None, None)
+            callback, vals, weights = get_gd_state_recorder_callback() #record the objective value and parameters
+            model = GradientDescent(learning_rate=FixedLR(eta), callback=callback)
+            model.fit(module(weights=np.copy(init)), np.array([0]), np.array([0]))
             results[eta] = (vals, weights)
-            # Plot algorithm's descent path
-            plot_descent_path(module, np.array([init] + weights), f"{name} - Learning Rate: {eta} ")\
-                .write_image(f"../figures/gd_{name}_eta_{eta}.png")
 
-        # Plot algorithm's convergence for the different values of eta
-        fig = go.Figure(layout=go.Layout(xaxis=dict(title="GD Iteration"),
+            if eta == .01:  # Plotting descent path for the learning rate of 0.01 as requested
+                plot = plot_descent_path(module, np.array([init] + weights), title=f" - Fixed Learning Rate: {eta}")
+                plot.write_html(f"GD_{module.__name__}_fixed_rate_path.html")
+
+        # Plotting convergence of the algorithm for different learning rates
+        fig = go.Figure(layout=go.Layout(xaxis=dict(title="Gradient Descent Iteration"),
                                          yaxis=dict(title="Norm"),
-                                         title=f"{name} GD Convergence For Different Learning Rates"))
-        for eta, (v, _) in results.items():
-            fig.add_trace(go.Scatter(x=list(range(len(v))), y=v, mode="lines", name=rf"$\eta={eta}$"))
-        fig.write_image(f"gd_{name}_fixed_rate_convergence.png")
-
-
+                                         title=f"Convergence of {module.__name__}"))
+        colors = ['red', 'green', 'blue', 'purple']
+        for eta, color in zip(results.keys(), colors):
+            fig.add_trace(go.Scatter(x=list(range(len(results[eta][0]))), y=results[eta][0], mode="lines", name="eta={eta}", line=dict(color=color)))
+        fig.write_html(f"GD_{module.__name__}_fixed_rate_convergence.html")
 
 
 def load_data(path: str = "SAheart.data", train_portion: float = .8) -> \
@@ -146,45 +144,59 @@ def load_data(path: str = "SAheart.data", train_portion: float = .8) -> \
 
 
 def fit_logistic_regression():
-    # Load and split SA Heart Disease dataset
-    X_train, y_train, X_test, y_test = load_data()
+    X_train, y_train, X_test, y_test = load_data() # Load data and split into train and test sets
 
-    # # Plotting convergence rate of logistic regression over SA heart disease data
-    logistic_regression = LogisticRegression()
-    logistic_regression.fit(X_train, y_train)
-    predictions = logistic_regression.predict(X_test)
-    accuracy = np.mean(predictions == y_test)
+    # Fitting logistic regression with fixed learning rate
+    callback, losses, weights = get_gd_state_recorder_callback()
+    max_iter = 20000
+    lr = 1e-4
+    gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter, callback=callback) # Initialize Gradient Descent
+    model = LogisticRegression(solver=gd).fit(X_train.values, y_train.values) # Fit logistic regression model
 
-    _, values, weights = get_gd_state_recorder_callback()
-    fig = go.Figure([go.Scatter(x=list(range(len(values))), y=values, mode='lines', name='Convergence Rate')])
-    fig.update_layout(title='Convergence Rate of Logistic Regression', xaxis_title='Iteration', yaxis_title='Objective Value')
-    fig.show()
+    y_prob = model.predict_proba(X_train.values) # Predict probabilities of positive class
 
-    # Fitting l1- and l2-regularized logistic regression models, using cross-validation to specify
-    # values of regularization parameter
-    l1_model = LogisticRegression(penalty='l1')
-    l2_model = LogisticRegression(penalty='l2')
+    fpr, tpr, thresholds = roc_curve(y_train, y_prob)
+    go.Figure([go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(color="purple", dash='dash'), showlegend=False),
+               go.Scatter(x=fpr, y=tpr, mode='lines', text=thresholds, showlegend=False,
+                          hovertemplate="<b>Threshold:</b>%{text:.3f}<br>FPR: %{x:.3f}<br>TPR: %{y:.3f}")],
+              layout=go.Layout(title=rf"$\text{{ROC Curve - Logistic Regression - AUC}}={auc(fpr, tpr):.3f}$",
+                               width=400, height=400, xaxis=dict(title="FPR"), yaxis=dict(title="TPR")))\
+            .write_html(f"gd_logistic_roc_lr{lr:.4f}.html")
 
-    # Cross-validation to determine the best regularization parameter
-    # Note: Implement cross-validation logic here
+    model.alpha_ = thresholds[np.argmax(tpr-fpr)] # Set threshold to maximize TPR-FPR
 
-    l1_model.fit(X_train, y_train)
-    l2_model.fit(X_train, y_train)
+    lamdas = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1]
+    for penalty, lambdas in [("l1", lamdas),
+                             ("l2", lamdas)]:
+        # Running cross validation
+        scores = np.zeros((len(lambdas), 2))
+        for i, lamda in enumerate(lambdas):
 
-    l1_predictions = l1_model.predict(X_test)
-    l2_predictions = l2_model.predict(X_test)
+            gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter)
+            logistic = LogisticRegression(solver=gd, penalty=penalty, lam=lamda, alpha=.5)
+            scores[i] = cross_validate(estimator=logistic, X=X_train.values, y=y_train.values,
+                                       scoring=misclassification_error)
 
-    l1_accuracy = np.mean(l1_predictions == y_test)
-    l2_accuracy = np.mean(l2_predictions == y_test)
+        # Selecting optimal lambda
+        fig = go.Figure([go.Scatter(x=lambdas, y=scores[:, 0], name="Train Error", line=dict(color='purple')),
+                         go.Scatter(x=lambdas, y=scores[:, 1], name="Validation Error", line=dict(color='green'))],
+                        layout=go.Layout(
+                            title="Train and Validation errors for Logistic Regression",
+                            xaxis=dict(title="Lambda"),
+                            yaxis=dict(title="Error Rate")))
+        fig.write_html(f"{penalty}_logistic_regression_errors.html")
 
-    # Plotting results
-    l1_fig = go.Figure([go.Scatter(x=list(range(len(l1_model.loss_history))), y=l1_model.loss_history, mode='lines', name='L1 Convergence Rate')])
-    l1_fig.update_layout(title='Convergence Rate of L1-Regularized Logistic Regression', xaxis_title='Iteration', yaxis_title='Objective Value')
-    l1_fig.show()
+        # fitting a model with the best lambda on the entire train set
+        lam_opt = lambdas[np.argmin(scores[:, 1])]
+        gd = GradientDescent(learning_rate=FixedLR(lr), max_iter=max_iter)
+        model = LogisticRegression(solver=gd, penalty=penalty, lam=lam_opt, alpha=.5).fit(X_train.values, y_train.values)
 
-    l2_fig = go.Figure([go.Scatter(x=list(range(len(l2_model.loss_history))), y=l2_model.loss_history, mode='lines', name='L2 Convergence Rate')])
-    l2_fig.update_layout(title='Convergence Rate of L2-Regularized Logistic Regression', xaxis_title='Iteration', yaxis_title='Objective Value')
-    l2_fig.show()
+        # Get predictions
+        train_pred = model.predict(X_train.values)
+        test_pred = model.predict(X_test.values)
+
+        print(f"Optimal lambda for {penalty} penalty: {lam_opt}, Train Error: {misclassification_error(y_train.values, train_pred):.3f}, Test Error: {misclassification_error(y_test.values, test_pred)}")
+
 
 
 if __name__ == '__main__':

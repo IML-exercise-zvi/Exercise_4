@@ -3,6 +3,7 @@ import numpy as np
 from base_estimator import BaseEstimator
 from gradient_descent import GradientDescent
 from modules import L1, L2 ,LogisticModule, RegularizedModule
+from loss_functions import misclassification_error
 
 
 
@@ -93,13 +94,15 @@ class LogisticRegression(BaseEstimator):
             X = np.c_[np.ones(X.shape[0]), X]
 
         init = np.random.randn(X.shape[1]) / (X.shape[1] ** 0.5)
-        objective = LogisticModule(weights=init) if self.penalty_ == "none" else \
-            RegularizedModule(fidelity_module=LogisticModule(),
+        if self.penalty_ == "none":
+            object = LogisticModule(weights=init)
+        else:
+            object = RegularizedModule(fidelity_module=LogisticModule(),
                               regularization_module={"l1": L1, "l2": L2}[self.penalty_](),
                               lam=self.lam_,
                               include_intercept=self.include_intercept_,
                               weights=init)
-        self.coefs_ = self.solver_.fit(objective, X, y)
+        self.coefs_ = self.solver_.fit(object, X, y)
 
     def _predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -115,7 +118,7 @@ class LogisticRegression(BaseEstimator):
         responses : ndarray of shape (n_samples, )
             Predicted responses of given samples
         """
-        return self.predict_proba(X) > self.alpha_ 
+        return (self.predict_proba(X) >= self.alpha_).astype(int)
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
@@ -154,5 +157,4 @@ class LogisticRegression(BaseEstimator):
         loss : float
             Performance under misclassification error
         """
-        from loss_functions import misclassification_error
         return misclassification_error(y, self.predict(X))
